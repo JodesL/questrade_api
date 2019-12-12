@@ -25,22 +25,32 @@ class QTApi:
     def _refresh_conn(self):
 
         if time.time() - self.conn_init_time > self.conn['expires_in']:
-            conn_init_time = time.time()
-            conn = requests.post('https://login.questrade.com/oauth2/token',
-                                 data={
-                                     'grant_type': 'refresh_token',
-                                     'refresh_token': self.conn['refresh_token']
-                                 })
+            tries = 5
+            for i in range(tries):
+                try:
+                    conn_init_time = time.time()
+                    conn = requests.post('https://login.questrade.com/oauth2/token',
+                                         data={
+                                             'grant_type': 'refresh_token',
+                                             'refresh_token': self.conn['refresh_token']
+                                         })
 
-            if conn.status_code != 200:
-                raise ConnectionError(f'Connection to Questrade API failed. \n'
-                                      f'Message: {conn.content} \n'
-                                      f'Error code: {conn.status_code}')
-            else:
-                print(f'Connection Success!')
-                self.conn_init_time = conn_init_time
-                self.conn = conn.json()
+                    if conn.status_code != 200:
+                        raise ConnectionError(f'Connection to Questrade API failed. \n'
+                                              f'Message: {conn.content} \n'
+                                              f'Error code: {conn.status_code}')
+                    else:
+                        print(f'Connection Success!')
+                        self.conn_init_time = conn_init_time
+                        self.conn = conn.json()
 
+                except:
+                    if i < tries - 1:
+                        time.sleep(10)
+                    else:
+                        raise
+
+                break
 
     def symbols_search(self, symbol_name):
 

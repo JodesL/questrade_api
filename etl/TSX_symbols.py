@@ -26,7 +26,6 @@ def scrape_symbols_tsx_website(
 
     extracted_table = pd.DataFrame(columns=['company_name', 'symbol'])
 
-
     for row in tqdm(rows[1:]):
         cols = row.find_elements_by_tag_name('td')
         to_append = [None, None]
