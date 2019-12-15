@@ -12,6 +12,8 @@ from questrade_api import QTApi
 def scrape_symbols_tsx_website(
         tsx_company_directory_url='https://www.tmxmoney.com/en/research/listed_company_directory.html',
         webdriver_exec_path='/usr/lib/chromium-browser/chromedriver'):
+
+    print('Scraping TSX website for symbols')
     driver = webdriver.Chrome(executable_path=webdriver_exec_path)
     driver.get(tsx_company_directory_url)
     elem = driver.find_element_by_id("SearchKeyword")
@@ -51,6 +53,8 @@ def insert_tsx_symbols_psql(tsx_symbol_table,
                             psql_url='localhost:5432',
                             psql_schema='questrade_api',
                             write_table_name='tsx_symbols'):
+
+    print('Inserting TSX symbols on postgresql')
     engine = create_engine(f'postgresql://{psql_user_name}:{psql_password}@{psql_url}/{psql_schema}')
 
     tsx_symbol_table.to_sql(name=write_table_name,
@@ -70,6 +74,8 @@ def insert_symbol_info_psql(tsx_symbols_table_name,
                             psql_url='localhost:5432',
                             psql_schema='questrade_api',
                             write_table_name='symbol_info'):
+
+    print('Getting additional symbol informatinon')
     engine = create_engine(f'postgresql://{psql_user_name}:{psql_password}@{psql_url}/{psql_schema}')
 
     tsx_symbols = pd.read_sql_table(table_name=tsx_symbols_table_name,
@@ -157,11 +163,9 @@ if __name__ == '__main__':
     sql_config = config['postgresql_server']
     qt_config = config['questrade_api']
 
-    print('Scraping TSX website for symbols')
     tsx_symbols = scrape_symbols_tsx_website(tsx_company_directory_url=tsx_config['tsx_company_directory_url'],
                                              webdriver_exec_path=tsx_config['webdriver_exec_path'])
 
-    print('Inserting TSX symbols on postgresql')
     insert_tsx_symbols_psql(tsx_symbol_table=tsx_symbols,
                             psql_user_name=sql_config['user'],
                             psql_password=sql_config['pwd'],
@@ -170,7 +174,6 @@ if __name__ == '__main__':
                             write_table_name=tsx_config['tsx_symbols_table_name']
                             )
 
-    print('Getting additional symbol informatinon')
     insert_symbol_info_psql(tsx_symbols_table_name=tsx_config['tsx_symbols_table_name'],
                             qt_api_token=qt_config['token'],
                             psql_user_name=sql_config['user'],

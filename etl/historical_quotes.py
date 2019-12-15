@@ -10,7 +10,6 @@ from questrade_api import QTApi
 
 def remove_duplicates_candlestick_data(db_name, user, password, host):
 
-    print('Removing duplicate rows from candlestick_data')
 
     conn = psycopg2.connect(
         dbname=db_name,
@@ -20,34 +19,52 @@ def remove_duplicates_candlestick_data(db_name, user, password, host):
 
     curr = conn.cursor()
 
-    print('Creating backup of original data (backup_candlestick_data)')
-    curr.execute('DROP table backup_candlestick_data;')
-    curr.execute('''
-        ALTER TABLE candlestick_data 
-        RENAME TO backup_candlestick_data;
-    ''')
+    # removes rows with start == end
+    curr.execute('DELETE FROM candlestick_data WHERE "start" = "end"')
+    curr.execute('SELECT COUNT(distinct("start", "symbol", "symbol_id")) FROM candlestick_data;')
+    distinct_row_count = curr.fetchone()
+    curr.execute('SELECT COUNT(*) FROM candlestick_data;')
+    total_row_count = curr.fetchone()
 
-    print('Keeping only distinct rows in candlestick_data')
-    curr.execute('''
-        CREATE TABLE candlestick_data AS
-        SELECT DISTINCT "start", "end", "low", "high", "open", "close", "volume", "VWAP", "symbol_id", "symbol"
-        FROM backup_candlestick_data;
+    if total_row_count[0] > distinct_row_count[0]:
+        print('Removing duplicate rows from candlestick_data')
+        print('Creating backup of original data (backup_candlestick_data)')
+        curr.execute('DROP table backup_candlestick_data;')
+        curr.execute('''
+            ALTER TABLE candlestick_data 
+            RENAME TO backup_candlestick_data;
         ''')
-    conn.commit()
 
-    print('Removed duplicates successful!')
+        print('Keeping only distinct rows in candlestick_data')
+        curr.execute('''
+            CREATE TABLE candlestick_data AS
+            SELECT DISTINCT "start", "end", "low", "high", "open", "close", "volume", "VWAP", "symbol_id", "symbol"
+            FROM backup_candlestick_data;
+            ''')
+        conn.commit()
+
+        curr.close()
+        conn.close()
+        print('Removed duplicates successful!')
+
+    else:
+        print('No duplicates in candlestick_data!')
 
 
-def update_candlestick_data(user, password, url, schema, qt_api_token):
+def update_candlestick_data(user, password, url, schema, qt_api_token, start_date=None):
 
     qt_api = QTApi(qt_api_token)
     engine = create_engine(f'postgresql://{user}:{password}@{url}/{schema}')
 
-    start_date = pd.read_sql("SELECT MAX(start) FROM candlestick_data;", con=engine).iloc[0, 0]
-    start_date += datetime.timedelta(days=1)
+    if not start_date:
+        start_date = pd.read_sql("SELECT MAX(start) FROM candlestick_data;", con=engine).iloc[0, 0]
+        start_date += datetime.timedelta(days=1)
     end_date = datetime.date.today()
 
-    print(f'Updating candlestick_data from {str(start)} to {str(end)}')
+    if start_date >= end_date:
+        raise(f'Candlestick_data already up to date!')
+
+    print(f'Updating candlestick_data from {str(start_date)} to {str(end_date)}')
 
     symbol_info = pd.read_sql('symbol_info',
                               con=engine)
@@ -117,7 +134,8 @@ if __name__ == '__main__':
                             password=psql_password,
                             url=psql_url,
                             schema=psql_schema,
-                            qt_api_token=qt_config['token'])
+                            qt_api_token=qt_config['token'],
+                            start_date=None)
 
     remove_duplicates_candlestick_data(db_name=psql_schema,
                                        user=psql_user_name,
