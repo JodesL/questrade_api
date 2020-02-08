@@ -1,3 +1,8 @@
+""""
+This is the implementation of the Questrade API. It will setup an API to be able to obtain market candles data
+as well as information on each ticker.
+
+"""
 import requests
 import time
 from datetime import datetime
@@ -18,11 +23,15 @@ class QTApi:
                                   f'Message: {self.conn.content} \n'
                                   f'Error code: {self.conn.status_code}')
         else:
-            print(f'Connection Success!')
+            print(f'Questrade API connection success!')
 
         self.conn = self.conn.json()
 
     def _refresh_conn(self):
+        """ Refreshes api connection
+        Will refresh token if token is expired.
+
+        """
 
         if time.time() - self.conn_init_time > self.conn['expires_in']:
             tries = 5
@@ -48,11 +57,32 @@ class QTApi:
                     if i < tries - 1:
                         time.sleep(10)
                     else:
+                        print('QTApi max number of retries has been hit, will raise error')
                         raise
 
                 break
 
     def symbols_search(self, symbol_name):
+        """ Searches for symbol
+
+        Searches for symbol and returns Questrade symbolId as well as the description,
+        security types and other information.
+
+        Args:
+            symbol_name (str): ticker symbol
+
+        Returns:
+            dict:
+                {'symbol': (str),
+                 'symbolId': (int),
+                 'description': (str),
+                 'securityType': (str),
+                 'listingExchange': (str),
+                 'isTradable': (bool),
+                 'isQuotable': (bool),
+                 'currency': (str)}
+
+        """
 
         self._refresh_conn()
         response = requests.get(url=f"{self.conn['api_server']}v1/symbols/search", params={'prefix': symbol_name},
@@ -61,6 +91,28 @@ class QTApi:
         return response.json()
 
     def symbols_info(self, symbol_id):
+        """ Get additional information on symbol
+
+        Obtain fundamental information on ticker. Requires the symbolId obtainable from self.symbol_search().
+
+        Args:
+            symbol_id (int): symbolId of ticker
+
+        Returns:
+            dict:
+                {'symbols':
+                    [
+                    {'symbol': (str),
+                    'symbolId': (int),
+                    'prevDayClosePrice': (float),
+                    'highPrice52': (float),
+                    'lowPrice52': (float),
+                    'averageVol3Months': (float),
+                    ....}
+                    ]
+                }
+
+        """
 
         self._refresh_conn()
         response = requests.get(url=f"{self.conn['api_server']}v1/symbols/{symbol_id}",
@@ -69,6 +121,39 @@ class QTApi:
         return response.json()
 
     def market_candles(self, symbol_id, start_date, end_date):
+        """ Obtain daily market candles quotes
+        Using symbolId and defined start and end date in (y-m-d) obtain a list of candles information; open, high, low,
+        low, close, volume. Candles are at the daily level.
+
+        Args:
+            symbol_id (int): symbolId number
+            start_date (str): string representing the start date in %Y-%m-%d format (2020-01-01)
+            end_date (str): string representing the start date in %Y-%m-%d format (2020-12-31)
+
+        Returns:
+            dict:
+                {'candles':
+                    [{'start': (datetime),
+                       'end': (datetime),
+                       'low': (float),
+                       'high': (float),
+                       'open': (float),
+                       'close': (float),
+                       'volume': (int),
+                       'VWAP': (float)},
+                      {'start': (datetime),
+                       'end': (datetime),
+                       'low': (float),
+                       'high': (float),
+                       'open': (float),
+                       'close': (float),
+                       'volume': (int),
+                       'VWAP': (float)}
+                       ....
+                    ]
+                }
+
+        """
 
         self._refresh_conn()
         begin = datetime.strptime(start_date, '%Y-%m-%d')
@@ -82,16 +167,3 @@ class QTApi:
                                 headers={'Authorization': f'Bearer {self.conn["access_token"]}'})
 
         return response.json()
-
-if __name__ == '__main__':
-
-    test_API = QTApi('test_string')
-
-    bmo_symbol = test_API.symbols_search('BMO.TO')['symbols'][0]
-
-    test_API.symbols_info(bmo_symbol['symbolId'])
-
-
-    test_API.market_candles(bmo_symbol['symbolId'],
-                            '2014-11-01',
-                            '2014-12-01')

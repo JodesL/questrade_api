@@ -1,6 +1,12 @@
+"""
+Contains function to scrape the tsx website to obtain all the ticker symbols that are currently listed on
+the Toronto Stock Exchange (TSX). Also has utilities to write to postgresql database.
+
+"""
+
 import time
-from datetime import datetime
 import pandas as pd
+from datetime import datetime
 from configparser import ConfigParser
 from selenium import webdriver
 from sqlalchemy import create_engine, types
@@ -12,7 +18,18 @@ from questrade_api import QTApi
 def scrape_symbols_tsx_website(
         tsx_company_directory_url='https://www.tmxmoney.com/en/research/listed_company_directory.html',
         webdriver_exec_path='/usr/lib/chromium-browser/chromedriver'):
+    """ Scrape ticker symbols from TSX website
+    Will go to company directory url and use a provided webdriver executable to scrape the ticker symbol
+    strings.
 
+    Args:
+        tsx_company_directory_url (str): TSX company directory url
+        webdriver_exec_path (str): local path to webdriver executable
+
+    Returns:
+        dataframe: table with the ticker's name as well as its symbol
+
+    """
     print('Scraping TSX website for symbols')
     driver = webdriver.Chrome(executable_path=webdriver_exec_path)
     driver.get(tsx_company_directory_url)
@@ -47,47 +64,51 @@ def scrape_symbols_tsx_website(
     return final_table
 
 
-def insert_tsx_symbols_psql(tsx_symbol_table,
-                            psql_user_name,
-                            psql_password,
-                            psql_url='localhost:5432',
-                            psql_schema='questrade_api',
-                            write_table_name='tsx_symbols'):
+def insert_dataframe_timestamp_psql(dataframe, psql_table_name, psql_engine):
+    """ Write TSX symbols dataframe to postgresql
+    Will write the table to postgresql database as well as create a timestamped version of it.
 
-    print('Inserting TSX symbols on postgresql')
-    engine = create_engine(f'postgresql://{psql_user_name}:{psql_password}@{psql_url}/{psql_schema}')
-
-    tsx_symbol_table.to_sql(name=write_table_name,
-                            con=engine,
-                            index=False,
-                            if_exists='replace')
-
-    tsx_symbol_table.to_sql(name=f'{write_table_name}_{datetime.date(datetime.now())}',
-                            con=engine,
-                            index=False)
+    Args:
+        dataframe (dataframe): name of the pandas dataframe to insert in postgres
+        psql_engine (sqlalchemy.engine): sqlalchemy connection engine
+        psql_table_name (str): name of the table to write to
 
 
-def insert_symbol_info_psql(tsx_symbols_table_name,
-                            qt_api_token,
-                            psql_user_name,
-                            psql_password,
-                            psql_url='localhost:5432',
-                            psql_schema='questrade_api',
-                            write_table_name='symbol_info'):
+    """
+    print(f'Inserting dataframe in {psql_table_name}')
+    dataframe.to_sql(name=psql_table_name,
+                     con=psql_engine,
+                     index=False,
+                     if_exists='replace')
 
-    print('Getting additional symbol informatinon')
-    engine = create_engine(f'postgresql://{psql_user_name}:{psql_password}@{psql_url}/{psql_schema}')
+    dataframe.to_sql(name=f'{psql_table_name}_{datetime.date(datetime.now())}',
+                     con=psql_engine,
+                     index=False)
 
-    tsx_symbols = pd.read_sql_table(table_name=tsx_symbols_table_name,
-                                    con=engine)
+    print(f'Insertion success!')
 
-    QT_api = QTApi(qt_api_token)
 
-    for i in tqdm(range(len(tsx_symbols))):
-        search_response = QT_api.symbols_search(f'{tsx_symbols.iloc[i]["symbol"]}.TO')
+def insert_additional_ticker_info_psql(ticker_symbols, psql_table_name, psql_engine, qt_api):
+    """ Inserts additonal ticker information to postgres
+    Will write additional information obtained from QTApi.symbols_info() method to postgresql table for all tickers
+    provided in iterable
+
+    Args:
+        ticker_symbols (iterable): iterable containg ticker symbols (str)
+        psql_table_name (str): name of the postgresql table to write to
+        psql_engine (sqlalchemy.egnine): connection engine to postgresql
+        qt_api (QTApi): questrade_api.QTApi object to call additional ticker info with
+
+    """
+
+    print('Getting additional ticker information')
+
+    if_exists = 'replace'
+    for symbol in tqdm(ticker_symbols):
+        search_response = qt_api.symbols_search(f'{symbol}.TO')
         if not search_response['symbols']:
             continue
-        info_response = QT_api.symbols_info(search_response['symbols'][0]['symbolId'])
+        info_response = qt_api.symbols_info(search_response['symbols'][0]['symbolId'])
         info_response_dict = info_response['symbols'][0]
 
         info_df = pd.DataFrame({
@@ -121,9 +142,9 @@ def insert_symbol_info_psql(tsx_symbols_table_name,
             index=[0],
         )
 
-        info_df.to_sql(name=write_table_name,
-                       con=engine,
-                       if_exists='append',
+        info_df.to_sql(name=psql_table_name,
+                       con=psql_engine,
+                       if_exists=if_exists,
                        index=False,
                        dtype={
                            'info_date': types.DATE,
@@ -154,7 +175,14 @@ def insert_symbol_info_psql(tsx_symbols_table_name,
                        }
                        )
 
+        if_exists = 'append'
+
+    print(f'Additional information written to {psql_table_name}')
+
+
 if __name__ == '__main__':
+
+    # Will write to postgres scraped tsx ticker symbol as well as additional information for each ticker
     parser = ConfigParser()
     parser.read('config.ini')
     config = parser._sections
@@ -166,19 +194,16 @@ if __name__ == '__main__':
     tsx_symbols = scrape_symbols_tsx_website(tsx_company_directory_url=tsx_config['tsx_company_directory_url'],
                                              webdriver_exec_path=tsx_config['webdriver_exec_path'])
 
-    insert_tsx_symbols_psql(tsx_symbol_table=tsx_symbols,
-                            psql_user_name=sql_config['user'],
-                            psql_password=sql_config['pwd'],
-                            psql_url=sql_config['local_url'],
-                            psql_schema=tsx_config['schema'],
-                            write_table_name=tsx_config['tsx_symbols_table_name']
-                            )
+    engine = create_engine(f'postgresql://{sql_config["user"]}:{sql_config["pwd"]}'
+                           f'@{sql_config["local_url"]}/{tsx_config["schema"]}')
 
-    insert_symbol_info_psql(tsx_symbols_table_name=tsx_config['tsx_symbols_table_name'],
-                            qt_api_token=qt_config['token'],
-                            psql_user_name=sql_config['user'],
-                            psql_password=sql_config['pwd'],
-                            psql_url=sql_config['local_url'],
-                            psql_schema=tsx_config['schema'],
-                            write_table_name=tsx_config['tsx_symbols_info_table_name']
-                            )
+    insert_dataframe_timestamp_psql(dataframe=tsx_symbols,
+                                    psql_table_name=tsx_config['tsx_symbols_table_name'],
+                                    psql_engine=engine
+                                    )
+
+    qt_api = QTApi(qt_config['token'])
+    insert_additional_ticker_info_psql(ticker_symbols=tsx_symbols['symbol'],
+                                       psql_table_name='symbol_info',
+                                       psql_engine=engine,
+                                       qt_api=qt_api)
