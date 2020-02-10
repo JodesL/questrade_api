@@ -6,27 +6,6 @@ from tqdm import tqdm
 
 from questrade_api import QTApi
 
-parser = ConfigParser()
-parser.read('config.ini')
-config = parser._sections
-
-tsx_config = config['tsx_website']
-sql_config = config['postgresql_server']
-qt_config = config['questrade_api']
-
-psql_user_name = sql_config['user']
-psql_password = sql_config['pwd']
-psql_hostname = sql_config['host_name']
-psql_url = sql_config['local_url']
-psql_schema = sql_config['schema']
-
-engine = create_engine(f'postgresql://{sql_config["user"]}:{sql_config["pwd"]}'
-                       f'@{sql_config["local_url"]}/{tsx_config["schema"]}')
-
-candlestick_table = 'backup_candlestick_data'
-test = pd.read_sql("SELECT * FROM backup_candlestick_data", con=engine)
-test.to_sql('backup_candlestick_data', con=engine, if_exists='replace', index=False)
-
 
 def remove_duplicates_candlestick_table(candlestick_table, engine):
     """ Remove duplicate rows from candlestick data table
@@ -89,6 +68,10 @@ def update_candlestick_data(candlestick_table, symbol_name_ids, engine, qt_api, 
     if not start_date:
         start_date = pd.read_sql(f"SELECT MAX(start) FROM {candlestick_table};", con=engine).iloc[0, 0]
         start_date += datetime.timedelta(days=1)
+    else:
+        start_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
+        start_date = start_date.date()
+
     end_date = datetime.date.today()
 
     if start_date >= end_date:
@@ -96,7 +79,7 @@ def update_candlestick_data(candlestick_table, symbol_name_ids, engine, qt_api, 
 
     print(f'Updating {candlestick_table} from {str(start_date)} to {str(end_date)}')
 
-    for symbol_tuple in tqdm(symbol_name_ids):
+    for symbol_tuple in tqdm(list(symbol_name_ids)):
         daily_candles = None
 
         symbol_id = symbol_tuple[0]
